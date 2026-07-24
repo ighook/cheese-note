@@ -17,7 +17,7 @@ export default defineContentScript({
       }
 
       event.preventDefault();
-      openMemoPopup();
+      void openMemoPopup();
     });
   },
 });

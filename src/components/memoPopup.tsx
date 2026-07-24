@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { addMemo } from "@/src/stores/memoStorage";
+import type {
+  ChannelMessageResponse,
+  ChzzkChannel,
+} from "@/src/types/channel";
 import styles from "./memoPopup.module.css";
 
 interface MemoPopupProps {
@@ -51,7 +55,11 @@ export function MemoPopup({
               {channelName || "Unknown channel"}
             </span>
           </div>
-          <button className={styles["close-button"]} type="button" onClick={onClose}>
+          <button
+            className={styles["close-button"]}
+            type="button"
+            onClick={onClose}
+          >
             x
           </button>
         </div>
@@ -71,7 +79,11 @@ export function MemoPopup({
           }}
         />
         <div className={styles.actions}>
-          <button className={styles["cancel-button"]} type="button" onClick={onClose}>
+          <button
+            className={styles["cancel-button"]}
+            type="button"
+            onClick={onClose}
+          >
             취소
           </button>
           <button
@@ -91,10 +103,34 @@ export function MemoPopup({
 let memoPopupRoot: Root | null = null;
 let memoPopupContainer: HTMLDivElement | null = null;
 
-export function openMemoPopup() {
-  const broadcastInfo = getBroadcastInfo();
+export async function openMemoPopup() {
+  const pageInfo = getPageInfo();
 
   closeMemoPopup();
+
+  if (!pageInfo.channelId) {
+    window.alert("현재 페이지에서 치지직 채널 ID를 찾을 수 없습니다.");
+    return;
+  }
+
+  let response: ChannelMessageResponse<ChzzkChannel>;
+
+  try {
+    response = await browser.runtime.sendMessage({
+      type: "channel:get",
+      channelId: pageInfo.channelId,
+    });
+  } catch {
+    window.alert(
+      "채널 조회 서비스를 시작할 수 없습니다. 확장프로그램을 다시 로드해 주세요.",
+    );
+    return;
+  }
+
+  if (!response.ok) {
+    window.alert(response.error);
+    return;
+  }
 
   memoPopupContainer = document.createElement("div");
   document.body.append(memoPopupContainer);
@@ -102,15 +138,15 @@ export function openMemoPopup() {
 
   memoPopupRoot.render(
     React.createElement(MemoPopup, {
-      title: broadcastInfo.title,
-      channelName: broadcastInfo.channelName,
-      elapsedTime: broadcastInfo.streamTime,
+      title: pageInfo.title,
+      channelName: response.data.channelName,
+      elapsedTime: pageInfo.elapsedTime,
       onClose: closeMemoPopup,
       onSave: async (memo: string) => {
         await addMemo({
-          channelId: broadcastInfo.channelName,
-          channelName: broadcastInfo.channelName,
-          elapsedTime: broadcastInfo.streamTime,
+          channelId: response.data.channelId,
+          channelName: response.data.channelName,
+          elapsedTime: pageInfo.elapsedTime,
           memo,
         });
         closeMemoPopup();
@@ -126,43 +162,103 @@ function closeMemoPopup() {
   memoPopupContainer = null;
 }
 
-interface BroadcastInfo {
+interface PageInfo {
+  channelId: string;
   title: string;
-  channelName: string;
-  streamTime: string;
+  elapsedTime: string;
 }
 
-function getBroadcastInfo(): BroadcastInfo {
-  const container = document.querySelector(
-    '[class^="live_information_container"]',
-  );
-
-  if (!container) {
-    return {
-      title: "",
-      channelName: "",
-      streamTime: "",
-    };
-  }
-
+function getPageInfo(): PageInfo {
+  const channelId = findChannelId();
   const title =
-    container
-      .querySelector('[class^="video_information_title"]')
-      ?.textContent?.trim() ?? "";
-
-  const channelName =
-    container.querySelector('[class^="name_text"]')?.textContent?.trim() ?? "";
-
-  const countText =
-    container
-      .querySelector('span[class^="video_information_count"]')
-      ?.textContent?.trim() ?? "";
-
-  const streamTime = countText.match(/\d{2}:\d{2}:\d{2}/)?.[0] ?? "";
+    document
+      .querySelector('meta[property="og:title"]')
+      ?.getAttribute("content")
+      ?.trim() ??
+    document.title.replace(/\s*[-|]\s*CHZZK.*$/i, "").trim();
 
   return {
+    channelId,
     title,
-    channelName,
-    streamTime,
+    elapsedTime: getBroadcastElapsedTime(),
   };
+}
+
+function getBroadcastElapsedTime() {
+  for (const element of document.querySelectorAll("span")) {
+    const elapsedTime = element.textContent
+      ?.trim()
+      .match(/^(\d+:\d{2}:\d{2})\s*스트리밍 중$/)?.[1];
+
+    if (elapsedTime) {
+      return normalizeElapsedTime(elapsedTime);
+    }
+  }
+
+  const timeSelectors = [
+    'span[class*="video_information_count"]',
+    '[class*="live_information"] [class*="time"]',
+    '[class*="video_information"] [class*="time"]',
+  ];
+
+  for (const selector of timeSelectors) {
+    for (const element of document.querySelectorAll(selector)) {
+      const elapsedTime = element.textContent?.match(/\d+:\d{2}:\d{2}/)?.[0];
+
+      if (elapsedTime) {
+        return normalizeElapsedTime(elapsedTime);
+      }
+    }
+  }
+
+  return formatElapsedTime(document.querySelector("video")?.currentTime ?? 0);
+}
+
+function findChannelId() {
+  const liveMatch = location.pathname.match(/^\/live\/([a-f0-9]{32})(?:\/|$)/i);
+
+  if (liveMatch) {
+    return liveMatch[1];
+  }
+
+  const channelAnchors = [
+    ...document.querySelectorAll<HTMLAnchorElement>(
+      '[class*="live_information"] a[href], [class*="video_information"] a[href]',
+    ),
+    ...document.querySelectorAll<HTMLAnchorElement>("a[href]"),
+  ];
+
+  for (const anchor of channelAnchors) {
+    const pathname = new URL(anchor.href, location.origin).pathname;
+    const channelMatch = pathname.match(/^\/([a-f0-9]{32})(?:\/|$)/i);
+
+    if (channelMatch) {
+      return channelMatch[1];
+    }
+  }
+
+  return "";
+}
+
+function formatElapsedTime(seconds: number) {
+  const safeSeconds = Number.isFinite(seconds)
+    ? Math.max(0, Math.floor(seconds))
+    : 0;
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  return [hours, minutes, remainingSeconds]
+    .map((value) => value.toString().padStart(2, "0"))
+    .join(":");
+}
+
+function normalizeElapsedTime(elapsedTime: string) {
+  const [hours, minutes, seconds] = elapsedTime.split(":");
+
+  return [
+    hours.padStart(2, "0"),
+    minutes.padStart(2, "0"),
+    seconds.padStart(2, "0"),
+  ].join(":");
 }
