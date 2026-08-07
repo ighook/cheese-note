@@ -146,6 +146,7 @@ export async function openMemoPopup() {
         await addMemo({
           channelId: response.data.channelId,
           channelName: response.data.channelName,
+          broadcastTitle: pageInfo.title,
           elapsedTime: pageInfo.elapsedTime,
           memo,
         });

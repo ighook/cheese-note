@@ -199,6 +199,14 @@ export function MemoList() {
                   <div className={styles["memo-group-cards"]}>
                     {group.memos.map((memo: MemoItem) => (
                       <div key={memo.id} className={styles["memo-card"]}>
+                        {memo.broadcastTitle && (
+                          <div
+                            className={styles["memo-broadcast-title"]}
+                            title={memo.broadcastTitle}
+                          >
+                            {memo.broadcastTitle}
+                          </div>
+                        )}
                         <div className={styles["memo-card-header"]}>
                           <span className={styles["memo-time-badge"]}>
                             {memo.elapsedTime || "00:00:00"}
@@ -370,6 +378,8 @@ function isMemoItem(value: unknown): value is MemoItem {
     typeof memo.id === "string" &&
     typeof memo.channelId === "string" &&
     typeof memo.channelName === "string" &&
+    (memo.broadcastTitle === undefined ||
+      typeof memo.broadcastTitle === "string") &&
     typeof memo.elapsedTime === "string" &&
     typeof memo.memo === "string" &&
     typeof memo.createdAt === "number"

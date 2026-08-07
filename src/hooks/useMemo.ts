@@ -5,6 +5,7 @@ import type { MemoItem } from "@/src/types/memo";
 interface CreateMemoParams {
   channelId: string;
   channelName: string;
+  broadcastTitle?: string;
   elapsedTime: string;
   memo: string;
 }
@@ -30,6 +31,7 @@ export function useMemos() {
       id: crypto.randomUUID(),
       channelId: params.channelId,
       channelName: params.channelName,
+      broadcastTitle: params.broadcastTitle,
       elapsedTime: params.elapsedTime,
       memo: params.memo,
       createdAt: Date.now(),

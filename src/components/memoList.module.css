@@ -211,6 +211,16 @@
   box-shadow: 0 4px 12px var(--accent-glow);
 }
 
+.memo-broadcast-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .memo-card-header {
   display: flex;
   align-items: center;
