@@ -2,10 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { addMemo } from "@/src/stores/memoStorage";
-import type {
-  ChannelMessageResponse,
-  ChzzkChannel,
-} from "@/src/types/channel";
+import { getChannelInfo, getCurrentChannelId, getLiveSession } from "@/src/stores/liveSession";
 import styles from "./memoPopup.module.css";
 
 interface MemoPopupProps {
@@ -28,7 +25,17 @@ export function MemoPopup({
 
   useEffect(() => {
     textareaRef.current?.focus();
-  }, []);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleSave = async () => {
     const trimmedMemo = memo.trim();
@@ -68,6 +75,7 @@ export function MemoPopup({
           ref={textareaRef}
           className={styles.textarea}
           value={memo}
+          maxLength={10_000}
           placeholder="메모를 입력해주세요."
           rows={1}
           onChange={(event) => setMemo(event.target.value)}
@@ -104,31 +112,31 @@ let memoPopupRoot: Root | null = null;
 let memoPopupContainer: HTMLDivElement | null = null;
 
 export async function openMemoPopup() {
-  const pageInfo = getPageInfo();
+  if (!getCurrentChannelId()) return;
+  const session = getLiveSession();
+  const pageInfo = session
+    ? {
+        channelId: session.channelId,
+        channelName: getChannelInfo()?.channelName || session.channelName,
+        title: session.title,
+        elapsedTime: formatElapsedTime(session.elapsedSeconds),
+      }
+    : getPageInfo();
 
   closeMemoPopup();
 
   if (!pageInfo.channelId) {
-    window.alert("현재 페이지에서 치지직 채널 ID를 찾을 수 없습니다.");
+    window.alert("현재 라이브 페이지에서 치지직 채널 ID를 찾을 수 없습니다.");
     return;
   }
 
-  let response: ChannelMessageResponse<ChzzkChannel>;
-
-  try {
-    response = await browser.runtime.sendMessage({
-      type: "channel:get",
-      channelId: pageInfo.channelId,
-    });
-  } catch {
-    window.alert(
-      "채널 조회 서비스를 시작할 수 없습니다. 확장프로그램을 다시 로드해 주세요.",
-    );
+  if (!pageInfo.channelName) {
+    window.alert("현재 라이브 페이지에서 스트리머 이름을 찾을 수 없습니다.");
     return;
   }
 
-  if (!response.ok) {
-    window.alert(response.error);
+  if (!pageInfo.elapsedTime) {
+    window.alert("현재 라이브 페이지에서 방송 시간을 찾을 수 없습니다.");
     return;
   }
 
@@ -139,13 +147,13 @@ export async function openMemoPopup() {
   memoPopupRoot.render(
     React.createElement(MemoPopup, {
       title: pageInfo.title,
-      channelName: response.data.channelName,
+      channelName: pageInfo.channelName,
       elapsedTime: pageInfo.elapsedTime,
       onClose: closeMemoPopup,
       onSave: async (memo: string) => {
         await addMemo({
-          channelId: response.data.channelId,
-          channelName: response.data.channelName,
+          channelId: pageInfo.channelId,
+          channelName: pageInfo.channelName,
           broadcastTitle: pageInfo.title,
           elapsedTime: pageInfo.elapsedTime,
           memo,
@@ -165,93 +173,61 @@ function closeMemoPopup() {
 
 interface PageInfo {
   channelId: string;
+  channelName: string;
   title: string;
   elapsedTime: string;
 }
 
 function getPageInfo(): PageInfo {
-  const channelId = findChannelId();
-  const title =
+  const channelId = getCurrentChannelId();
+  const rawTitle =
     document
       .querySelector('meta[property="og:title"]')
       ?.getAttribute("content")
-      ?.trim() ??
-    document.title.replace(/\s*[-|]\s*CHZZK.*$/i, "").trim();
+      ?.trim() ?? document.title.replace(/\s*[-|]\s*CHZZK.*$/i, "").trim();
+  const channelName = getChannelInfo()?.channelName ?? "";
+  const title = stripChannelPrefix(rawTitle, channelName);
 
   return {
     channelId,
+    channelName,
     title,
     elapsedTime: getBroadcastElapsedTime(),
   };
 }
 
-function getBroadcastElapsedTime() {
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripChannelPrefix(title: string, channelName: string): string {
+  const normalizedTitle = title.trim();
+  if (channelName) {
+    const escapedChannelName = escapeRegExp(channelName.trim());
+    const channelPrefix = new RegExp(
+      `^${escapedChannelName}\\s*[-–—|:]\\s*`,
+      "i",
+    );
+    if (channelPrefix.test(normalizedTitle)) {
+      return normalizedTitle.replace(channelPrefix, "").trim();
+    }
+  }
+
+  return normalizedTitle.replace(/^.+?\\s+[-–—|:]\\s+/, "").trim();
+}
+
+function getBroadcastElapsedTime(): string {
   for (const element of document.querySelectorAll("span")) {
     const elapsedTime = element.textContent
       ?.trim()
-      .match(/^(\d+:\d{2}:\d{2})\s*스트리밍 중$/)?.[1];
+      .match(/(\d{1,2}:\d{2}:\d{2})\s*스트리밍 중/)?.[1];
 
     if (elapsedTime) {
       return normalizeElapsedTime(elapsedTime);
     }
   }
 
-  const timeSelectors = [
-    'span[class*="video_information_count"]',
-    '[class*="live_information"] [class*="time"]',
-    '[class*="video_information"] [class*="time"]',
-  ];
-
-  for (const selector of timeSelectors) {
-    for (const element of document.querySelectorAll(selector)) {
-      const elapsedTime = element.textContent?.match(/\d+:\d{2}:\d{2}/)?.[0];
-
-      if (elapsedTime) {
-        return normalizeElapsedTime(elapsedTime);
-      }
-    }
-  }
-
-  return formatElapsedTime(document.querySelector("video")?.currentTime ?? 0);
-}
-
-function findChannelId() {
-  const liveMatch = location.pathname.match(/^\/live\/([a-f0-9]{32})(?:\/|$)/i);
-
-  if (liveMatch) {
-    return liveMatch[1];
-  }
-
-  const channelAnchors = [
-    ...document.querySelectorAll<HTMLAnchorElement>(
-      '[class*="live_information"] a[href], [class*="video_information"] a[href]',
-    ),
-    ...document.querySelectorAll<HTMLAnchorElement>("a[href]"),
-  ];
-
-  for (const anchor of channelAnchors) {
-    const pathname = new URL(anchor.href, location.origin).pathname;
-    const channelMatch = pathname.match(/^\/([a-f0-9]{32})(?:\/|$)/i);
-
-    if (channelMatch) {
-      return channelMatch[1];
-    }
-  }
-
   return "";
-}
-
-function formatElapsedTime(seconds: number) {
-  const safeSeconds = Number.isFinite(seconds)
-    ? Math.max(0, Math.floor(seconds))
-    : 0;
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const remainingSeconds = safeSeconds % 60;
-
-  return [hours, minutes, remainingSeconds]
-    .map((value) => value.toString().padStart(2, "0"))
-    .join(":");
 }
 
 function normalizeElapsedTime(elapsedTime: string) {
@@ -262,4 +238,13 @@ function normalizeElapsedTime(elapsedTime: string) {
     minutes.padStart(2, "0"),
     seconds.padStart(2, "0"),
   ].join(":");
+}
+
+function formatElapsedTime(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
 }

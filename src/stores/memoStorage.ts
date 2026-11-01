@@ -5,40 +5,57 @@ export const memoStorage = storage.defineItem<MemoItem[]>("local:memos", {
   fallback: [],
 });
 
-export async function addMemo(memo: CreateMemoItem) {
-  const currentMemos = await memoStorage.getValue();
+let mutationQueue: Promise<void> = Promise.resolve();
 
+function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const task = mutationQueue.then(operation);
+  mutationQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
+
+async function updateMemos(
+  updater: (memos: MemoItem[]) => MemoItem[],
+): Promise<MemoItem[]> {
+  return enqueueMutation(async () => {
+    const nextMemos = updater(await memoStorage.getValue());
+    await memoStorage.setValue(nextMemos);
+    return nextMemos;
+  });
+}
+
+export async function addMemo(memo: CreateMemoItem): Promise<MemoItem> {
   const newMemo: MemoItem = {
     ...memo,
     id: crypto.randomUUID(),
     createdAt: Date.now(),
   };
 
-  await memoStorage.setValue([newMemo, ...currentMemos]);
-
+  await updateMemos((currentMemos) => [newMemo, ...currentMemos]);
   return newMemo;
 }
 
-export async function deleteMemo(id: string) {
-  const currentMemos = await memoStorage.getValue();
-
-  const nextMemos = currentMemos.filter((memo) => memo.id !== id);
-
-  await memoStorage.setValue(nextMemos);
+export function deleteMemo(id: string): Promise<MemoItem[]> {
+  return updateMemos((memos) => memos.filter((memo) => memo.id !== id));
 }
 
-export async function clearMemos() {
-  await memoStorage.setValue([]);
+export function clearMemos(): Promise<MemoItem[]> {
+  return updateMemos(() => []);
 }
 
-export async function updateMemo(id: string, text: string) {
-  const currentMemos = await memoStorage.getValue();
-  const nextMemos = currentMemos.map((memo) =>
-    memo.id === id ? { ...memo, memo: text } : memo
+export function updateMemo(id: string, text: string): Promise<MemoItem[]> {
+  return updateMemos((memos) =>
+    memos.map((memo) => (memo.id === id ? { ...memo, memo: text } : memo)),
   );
-  await memoStorage.setValue(nextMemos);
 }
 
-export async function getMemos() {
-  return await memoStorage.getValue();
+export function replaceMemos(memos: MemoItem[]): Promise<MemoItem[]> {
+  return updateMemos(() => memos);
+}
+
+export async function getMemos(): Promise<MemoItem[]> {
+  await mutationQueue;
+  return memoStorage.getValue();
 }

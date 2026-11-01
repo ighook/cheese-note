@@ -3,6 +3,12 @@ import { useMemos } from "@/src/hooks/useMemo";
 import type { MemoItem } from "@/src/types/memo";
 import styles from "./memoList.module.css";
 
+const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_IMPORTED_MEMOS = 5_000;
+const MAX_MEMO_LENGTH = 10_000;
+const MAX_TEXT_FIELD_LENGTH = 500;
+const ELAPSED_TIME_PATTERN = /^\d{2,}:\d{2}:\d{2}$/;
+
 interface MemoGroup {
   channelName: string;
   memos: MemoItem[];
@@ -95,14 +101,23 @@ export function MemoList() {
       return;
     }
 
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      window.alert("가져올 파일은 5MB 이하여야 합니다.");
+      return;
+    }
+
     try {
       const text = await file.text();
-      const parsedData = JSON.parse(text);
+      const parsedData: unknown = JSON.parse(text);
       const importedMemos = Array.isArray(parsedData)
         ? parsedData
-        : parsedData?.memos;
+        : getImportedMemos(parsedData);
 
-      if (!Array.isArray(importedMemos) || !importedMemos.every(isMemoItem)) {
+      if (
+        importedMemos.length > MAX_IMPORTED_MEMOS ||
+        !importedMemos.every(isMemoItem) ||
+        new Set(importedMemos.map((memo) => memo.id)).size !== importedMemos.length
+      ) {
         window.alert("가져올 수 없는 메모 파일입니다.");
         return;
       }
@@ -315,6 +330,7 @@ function MemoTextarea({ memo, onUpdate }: MemoTextareaProps) {
           !isEditing ? styles["memo-textarea-readonly"] : ""
         }`}
         value={draft}
+        maxLength={MAX_MEMO_LENGTH}
         readOnly={!isEditing}
         onChange={(event) => {
           const nextDraft = event.target.value;
@@ -376,14 +392,32 @@ function isMemoItem(value: unknown): value is MemoItem {
 
   return (
     typeof memo.id === "string" &&
+    memo.id.length > 0 &&
+    memo.id.length <= MAX_TEXT_FIELD_LENGTH &&
     typeof memo.channelId === "string" &&
+    /^[a-f0-9]{32}$/i.test(memo.channelId) &&
     typeof memo.channelName === "string" &&
+    memo.channelName.length <= MAX_TEXT_FIELD_LENGTH &&
     (memo.broadcastTitle === undefined ||
-      typeof memo.broadcastTitle === "string") &&
+      (typeof memo.broadcastTitle === "string" &&
+        memo.broadcastTitle.length <= MAX_TEXT_FIELD_LENGTH)) &&
     typeof memo.elapsedTime === "string" &&
+    ELAPSED_TIME_PATTERN.test(memo.elapsedTime) &&
     typeof memo.memo === "string" &&
-    typeof memo.createdAt === "number"
+    memo.memo.length <= MAX_MEMO_LENGTH &&
+    typeof memo.createdAt === "number" &&
+    Number.isSafeInteger(memo.createdAt) &&
+    memo.createdAt > 0
   );
+}
+
+function getImportedMemos(value: unknown): unknown[] {
+  if (!value || typeof value !== "object" || !("memos" in value)) {
+    return [];
+  }
+
+  const memos = (value as { memos?: unknown }).memos;
+  return Array.isArray(memos) ? memos : [];
 }
 
 function formatMemoDate(createdAt: number) {
