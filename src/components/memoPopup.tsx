@@ -119,7 +119,7 @@ export async function openMemoPopup() {
         channelId: session.channelId,
         channelName: getChannelInfo()?.channelName || session.channelName,
         title: session.title,
-        elapsedTime: formatElapsedTime(session.elapsedSeconds),
+        elapsedTime: session.elapsedSeconds === null ? "" : formatElapsedTime(session.elapsedSeconds),
       }
     : getPageInfo();
 

@@ -19,7 +19,7 @@ export default defineContentScript({
           channelId: "",
           channelName: "",
           title: "",
-          elapsedSeconds: 0,
+          elapsedSeconds: null,
         });
         return;
       }
@@ -57,7 +57,7 @@ export default defineContentScript({
         title: title || current?.title || "",
         elapsedSeconds: elapsed
           ? Number(h) * 3600 + Number(m) * 60 + Number(s)
-          : (current?.elapsedSeconds ?? 0),
+          : null,
       });
     };
     captureSession();
