@@ -18,6 +18,13 @@ web-ext.config.ts
 .env
 .env.local
 .env.*.local
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.json
+credentials.json
 
 # Editor directories and files
 .vscode/*
@@ -32,3 +39,6 @@ web-ext.config.ts
 
 AGENTS.md
 .output
+coverage
+dist
+build

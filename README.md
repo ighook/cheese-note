@@ -1,4 +1,4 @@
-# Chzzk Time Marker
+# Cheese Note
 
 치지직 라이브 방송을 보면서 시점을 기록하고 메모를 남기는 Chrome 확장 프로그램입니다.
 
@@ -11,3 +11,7 @@
 - WXT
 - React
 - TypeScript
+
+## 문의 및 소스 코드
+
+- GitHub: [github.com/ighook/cheese-note](https://github.com/ighook/cheese-note)

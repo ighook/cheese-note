@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  clearMemos as clearStoredMemos,
+  memoStorage,
   deleteMemo as deleteStoredMemo,
+  deleteChannelMemos as deleteStoredChannelMemos,
   getMemos,
-  replaceMemos,
   updateMemo as updateStoredMemo,
 } from "@/src/stores/memoStorage";
 import type { MemoItem } from "@/src/types/memo";
@@ -27,21 +27,18 @@ export function useMemos() {
     setMemos(nextMemos);
   }, []);
 
+  const deleteChannelMemos = useCallback(async (channelId: string) => {
+    setMemos(await deleteStoredChannelMemos(channelId));
+  }, []);
+
   const updateMemo = useCallback(async (id: string, text: string) => {
     const nextMemos = await updateStoredMemo(id, text);
     setMemos(nextMemos);
   }, []);
 
-  const clearMemos = useCallback(async () => {
-    setMemos(await clearStoredMemos());
-  }, []);
-
-  const importMemos = useCallback(async (nextMemos: MemoItem[]) => {
-    setMemos(await replaceMemos(nextMemos));
-  }, []);
-
   useEffect(() => {
     loadMemos();
+    return memoStorage.watch((nextMemos) => setMemos(nextMemos ?? []));
   }, [loadMemos]);
 
   return {
@@ -49,8 +46,7 @@ export function useMemos() {
     loading,
     loadMemos,
     deleteMemo,
+    deleteChannelMemos,
     updateMemo,
-    importMemos,
-    clearMemos,
   };
 }

@@ -110,6 +110,11 @@ export function MemoPopup({
 
 let memoPopupRoot: Root | null = null;
 let memoPopupContainer: HTMLDivElement | null = null;
+const syncPopupFullscreenLayer = () => {
+  if (!memoPopupContainer) return;
+  const parent = document.fullscreenElement ?? document.body;
+  if (memoPopupContainer.parentElement !== parent) parent.append(memoPopupContainer);
+};
 
 export async function openMemoPopup() {
   if (!getCurrentChannelId()) return;
@@ -141,7 +146,8 @@ export async function openMemoPopup() {
   }
 
   memoPopupContainer = document.createElement("div");
-  document.body.append(memoPopupContainer);
+  syncPopupFullscreenLayer();
+  document.addEventListener("fullscreenchange", syncPopupFullscreenLayer);
   memoPopupRoot = createRoot(memoPopupContainer);
 
   memoPopupRoot.render(
@@ -165,6 +171,7 @@ export async function openMemoPopup() {
 }
 
 function closeMemoPopup() {
+  document.removeEventListener("fullscreenchange", syncPopupFullscreenLayer);
   memoPopupRoot?.unmount();
   memoPopupRoot = null;
   memoPopupContainer?.remove();

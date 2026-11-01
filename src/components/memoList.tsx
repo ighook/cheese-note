@@ -1,23 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMemos } from "@/src/hooks/useMemo";
 import type { MemoItem } from "@/src/types/memo";
 import styles from "./memoList.module.css";
 
-const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
-const MAX_IMPORTED_MEMOS = 5_000;
 const MAX_MEMO_LENGTH = 10_000;
-const MAX_TEXT_FIELD_LENGTH = 500;
-const ELAPSED_TIME_PATTERN = /^\d{2,}:\d{2}:\d{2}$/;
 
 interface MemoGroup {
+  channelId: string;
   channelName: string;
   memos: MemoItem[];
 }
 
 export function MemoList() {
-  const { memos, loading, deleteMemo, updateMemo, importMemos, clearMemos } =
+  const { memos, loading, deleteMemo, deleteChannelMemos, updateMemo } =
     useMemos();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [collapsedChannels, setCollapsedChannels] = useState<Set<string>>(
     () => new Set()
   );
@@ -27,12 +23,13 @@ export function MemoList() {
 
     for (const memo of memos) {
       const channelName = memo.channelName || "알 수 없는 채널";
-      const group = groups.get(channelName);
+      const group = groups.get(memo.channelId);
 
       if (group) {
         group.memos.push(memo);
       } else {
-        groups.set(channelName, {
+        groups.set(memo.channelId, {
+          channelId: memo.channelId,
           channelName,
           memos: [memo],
         });
@@ -45,7 +42,7 @@ export function MemoList() {
   useEffect(() => {
     setCollapsedChannels((currentChannels) => {
       const nextChannels = new Set<string>();
-      const channelNames = new Set(memoGroups.map((group) => group.channelName));
+      const channelNames = new Set(memoGroups.map((group) => group.channelId));
 
       for (const channelName of currentChannels) {
         if (channelNames.has(channelName)) {
@@ -71,63 +68,6 @@ export function MemoList() {
     });
   };
 
-  const exportMemoList = () => {
-    const exportData = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      memos,
-    };
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = `chzzk-memos-${formatFileDate(new Date())}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const openImportFile = () => {
-    fileInputRef.current?.click();
-  };
-
-  const importMemoList = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    if (file.size > MAX_IMPORT_FILE_BYTES) {
-      window.alert("가져올 파일은 5MB 이하여야 합니다.");
-      return;
-    }
-
-    try {
-      const text = await file.text();
-      const parsedData: unknown = JSON.parse(text);
-      const importedMemos = Array.isArray(parsedData)
-        ? parsedData
-        : getImportedMemos(parsedData);
-
-      if (
-        importedMemos.length > MAX_IMPORTED_MEMOS ||
-        !importedMemos.every(isMemoItem) ||
-        new Set(importedMemos.map((memo) => memo.id)).size !== importedMemos.length
-      ) {
-        window.alert("가져올 수 없는 메모 파일입니다.");
-        return;
-      }
-
-      await importMemos(importedMemos);
-    } catch {
-      window.alert("메모 파일을 읽는 중 문제가 발생했습니다.");
-    }
-  };
-
   if (loading) {
     return <div className={styles["loading-state"]}>불러오는 중...</div>;
   }
@@ -136,38 +76,6 @@ export function MemoList() {
     <div className={styles["memo-list-container"]}>
       <div className={styles["memo-list-header"]}>
         <span className={styles["memo-count"]}>전체 메모 ({memos.length})</span>
-        <div className={styles["memo-list-actions"]}>
-          <button
-            className={styles["list-action-btn"]}
-            type="button"
-            onClick={exportMemoList}
-            disabled={memos.length === 0}
-          >
-            내보내기
-          </button>
-          <button
-            className={styles["list-action-btn"]}
-            type="button"
-            onClick={openImportFile}
-          >
-            가져오기
-          </button>
-          <button
-            className={styles["clear-all-btn"]}
-            type="button"
-            onClick={clearMemos}
-            disabled={memos.length === 0}
-          >
-            비우기
-          </button>
-          <input
-            ref={fileInputRef}
-            className={styles["memo-import-input"]}
-            type="file"
-            accept="application/json,.json"
-            onChange={importMemoList}
-          />
-        </div>
       </div>
 
       {memos.length === 0 ? (
@@ -183,19 +91,15 @@ export function MemoList() {
       ) : (
         <div className={styles["memo-cards-scroll"]}>
           {memoGroups.map((group) => {
-            const isCollapsed = collapsedChannels.has(group.channelName);
+            const isCollapsed = collapsedChannels.has(group.channelId);
 
             return (
               <section
-                key={group.channelName}
+                key={group.channelId}
                 className={styles["memo-channel-group"]}
               >
-                <button
-                  className={styles["memo-channel-header"]}
-                  type="button"
-                  onClick={() => toggleChannel(group.channelName)}
-                  aria-expanded={!isCollapsed}
-                >
+                <div className={styles["memo-channel-header"]}>
+                  <button className={styles["memo-channel-toggle-button"]} type="button" onClick={() => toggleChannel(group.channelId)} aria-expanded={!isCollapsed}>
                   <span className={styles["memo-channel-toggle"]}>
                     {isCollapsed ? "▶" : "▼"}
                   </span>
@@ -205,10 +109,19 @@ export function MemoList() {
                   >
                     {group.channelName}
                   </span>
-                  <span className={styles["memo-channel-count"]}>
-                    {group.memos.length}
-                  </span>
-                </button>
+                  <span className={styles["memo-channel-count"]}>{group.memos.length}</span>
+                  </button>
+                  <button
+                    className={styles["clear-all-btn"]}
+                    type="button"
+                    aria-label={`${group.channelName} 메모 전체 삭제`}
+                    onClick={() => {
+                      if (window.confirm(`${group.channelName}의 메모 ${group.memos.length}개를 모두 삭제할까요?`)) {
+                        void deleteChannelMemos(group.channelId);
+                      }
+                    }}
+                  >전체 삭제</button>
+                </div>
 
                 {!isCollapsed && (
                   <div className={styles["memo-group-cards"]}>
@@ -222,36 +135,7 @@ export function MemoList() {
                             {memo.broadcastTitle}
                           </div>
                         )}
-                        <div className={styles["memo-card-header"]}>
-                          <span className={styles["memo-time-badge"]}>
-                            {memo.elapsedTime || "00:00:00"}
-                          </span>
-                          <span className={styles["memo-created-date"]}>
-                            {formatMemoDate(memo.createdAt)}
-                          </span>
-                          <button
-                            className={styles["memo-delete-btn"]}
-                            onClick={() => deleteMemo(memo.id)}
-                            title="삭제"
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              width="14"
-                              height="14"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <line x1="18" y1="6" x2="6" y2="18"></line>
-                              <line x1="6" y1="6" x2="18" y2="18"></line>
-                            </svg>
-                          </button>
-                        </div>
-                        <div className={styles["memo-card-body"]}>
-                          <MemoTextarea memo={memo} onUpdate={updateMemo} />
-                        </div>
+                        <MemoTextarea memo={memo} onUpdate={updateMemo} onDelete={deleteMemo} />
                       </div>
                     ))}
                   </div>
@@ -268,9 +152,10 @@ export function MemoList() {
 interface MemoTextareaProps {
   memo: MemoItem;
   onUpdate: (id: string, text: string) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
 }
 
-function MemoTextarea({ memo, onUpdate }: MemoTextareaProps) {
+function MemoTextarea({ memo, onUpdate, onDelete }: MemoTextareaProps) {
   const [draft, setDraft] = useState(memo.memo);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -324,31 +209,9 @@ function MemoTextarea({ memo, onUpdate }: MemoTextareaProps) {
 
   return (
     <>
-      <textarea
-        ref={textareaRef}
-        className={`${styles["memo-textarea"]} ${
-          !isEditing ? styles["memo-textarea-readonly"] : ""
-        }`}
-        value={draft}
-        maxLength={MAX_MEMO_LENGTH}
-        readOnly={!isEditing}
-        onChange={(event) => {
-          const nextDraft = event.target.value;
-          setDraft(nextDraft);
-          latestDraftRef.current = nextDraft;
-        }}
-        onCompositionStart={() => {
-          isComposingRef.current = true;
-        }}
-        onCompositionEnd={(event) => {
-          isComposingRef.current = false;
-          const nextDraft = event.currentTarget.value;
-          setDraft(nextDraft);
-          latestDraftRef.current = nextDraft;
-        }}
-        placeholder="메모를 입력하세요..."
-        rows={1}
-      />
+      <div className={styles["memo-card-header"]}>
+        <span className={styles["memo-time-badge"]}>{memo.elapsedTime || "00:00:00"}</span>
+        <span className={styles["memo-created-date"]}>{formatMemoDate(memo.createdAt)}</span>
       <div className={styles["memo-edit-actions"]}>
         {isEditing ? (
           <>
@@ -379,45 +242,39 @@ function MemoTextarea({ memo, onUpdate }: MemoTextareaProps) {
           </button>
         )}
       </div>
+        <button className={styles["memo-delete-btn"]} type="button" onClick={() => onDelete(memo.id)}>
+          삭제
+        </button>
+      </div>
+      <div className={styles["memo-card-body"]}>
+      <textarea
+        ref={textareaRef}
+        className={`${styles["memo-textarea"]} ${
+          !isEditing ? styles["memo-textarea-readonly"] : ""
+        }`}
+        value={draft}
+        maxLength={MAX_MEMO_LENGTH}
+        readOnly={!isEditing}
+        onChange={(event) => {
+          const nextDraft = event.target.value;
+          setDraft(nextDraft);
+          latestDraftRef.current = nextDraft;
+        }}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={(event) => {
+          isComposingRef.current = false;
+          const nextDraft = event.currentTarget.value;
+          setDraft(nextDraft);
+          latestDraftRef.current = nextDraft;
+        }}
+        placeholder="메모를 입력하세요..."
+        rows={1}
+      />
+      </div>
     </>
   );
-}
-
-function isMemoItem(value: unknown): value is MemoItem {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const memo = value as MemoItem;
-
-  return (
-    typeof memo.id === "string" &&
-    memo.id.length > 0 &&
-    memo.id.length <= MAX_TEXT_FIELD_LENGTH &&
-    typeof memo.channelId === "string" &&
-    /^[a-f0-9]{32}$/i.test(memo.channelId) &&
-    typeof memo.channelName === "string" &&
-    memo.channelName.length <= MAX_TEXT_FIELD_LENGTH &&
-    (memo.broadcastTitle === undefined ||
-      (typeof memo.broadcastTitle === "string" &&
-        memo.broadcastTitle.length <= MAX_TEXT_FIELD_LENGTH)) &&
-    typeof memo.elapsedTime === "string" &&
-    ELAPSED_TIME_PATTERN.test(memo.elapsedTime) &&
-    typeof memo.memo === "string" &&
-    memo.memo.length <= MAX_MEMO_LENGTH &&
-    typeof memo.createdAt === "number" &&
-    Number.isSafeInteger(memo.createdAt) &&
-    memo.createdAt > 0
-  );
-}
-
-function getImportedMemos(value: unknown): unknown[] {
-  if (!value || typeof value !== "object" || !("memos" in value)) {
-    return [];
-  }
-
-  const memos = (value as { memos?: unknown }).memos;
-  return Array.isArray(memos) ? memos : [];
 }
 
 function formatMemoDate(createdAt: number) {
@@ -426,8 +283,4 @@ function formatMemoDate(createdAt: number) {
     month: "2-digit",
     day: "2-digit",
   }).format(createdAt);
-}
-
-function formatFileDate(date: Date) {
-  return date.toISOString().slice(0, 10);
 }

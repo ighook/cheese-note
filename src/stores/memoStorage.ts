@@ -5,57 +5,53 @@ export const memoStorage = storage.defineItem<MemoItem[]>("local:memos", {
   fallback: [],
 });
 
-let mutationQueue: Promise<void> = Promise.resolve();
+type MemoMutation =
+  | { type: "add"; memo: CreateMemoItem }
+  | { type: "delete"; id: string }
+  | { type: "deleteChannel"; channelId: string }
+  | { type: "update"; id: string; text: string };
 
-function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
-  const task = mutationQueue.then(operation);
-  mutationQueue = task.then(
-    () => undefined,
-    () => undefined,
-  );
-  return task;
+export type MemoMessage = { type: "memos:get" } | { type: "memos:mutate"; mutation: MemoMutation };
+
+export async function applyMemoMutation(mutation: MemoMutation): Promise<MemoItem[]> {
+  const memos = await memoStorage.getValue();
+  let nextMemos: MemoItem[];
+  if (mutation.type === "add") {
+    nextMemos = [{ ...mutation.memo, id: crypto.randomUUID(), createdAt: Date.now() }, ...memos];
+  } else if (mutation.type === "delete") {
+    nextMemos = memos.filter((memo) => memo.id !== mutation.id);
+  } else if (mutation.type === "deleteChannel") {
+    nextMemos = memos.filter((memo) => memo.channelId !== mutation.channelId);
+  } else {
+    nextMemos = memos.map((memo) => memo.id === mutation.id ? { ...memo, memo: mutation.text } : memo);
+  }
+  await memoStorage.setValue(nextMemos);
+  return nextMemos;
 }
 
-async function updateMemos(
-  updater: (memos: MemoItem[]) => MemoItem[],
-): Promise<MemoItem[]> {
-  return enqueueMutation(async () => {
-    const nextMemos = updater(await memoStorage.getValue());
-    await memoStorage.setValue(nextMemos);
-    return nextMemos;
-  });
+async function sendMessage(message: MemoMessage): Promise<MemoItem[]> {
+  const response = await browser.runtime.sendMessage(message) as { memos?: MemoItem[]; error?: string };
+  if (response.error) throw new Error(response.error);
+  return response.memos ?? [];
 }
 
 export async function addMemo(memo: CreateMemoItem): Promise<MemoItem> {
-  const newMemo: MemoItem = {
-    ...memo,
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-  };
-
-  await updateMemos((currentMemos) => [newMemo, ...currentMemos]);
-  return newMemo;
+  const memos = await sendMessage({ type: "memos:mutate", mutation: { type: "add", memo } });
+  return memos[0];
 }
 
 export function deleteMemo(id: string): Promise<MemoItem[]> {
-  return updateMemos((memos) => memos.filter((memo) => memo.id !== id));
+  return sendMessage({ type: "memos:mutate", mutation: { type: "delete", id } });
 }
 
-export function clearMemos(): Promise<MemoItem[]> {
-  return updateMemos(() => []);
+export function deleteChannelMemos(channelId: string): Promise<MemoItem[]> {
+  return sendMessage({ type: "memos:mutate", mutation: { type: "deleteChannel", channelId } });
 }
 
 export function updateMemo(id: string, text: string): Promise<MemoItem[]> {
-  return updateMemos((memos) =>
-    memos.map((memo) => (memo.id === id ? { ...memo, memo: text } : memo)),
-  );
-}
-
-export function replaceMemos(memos: MemoItem[]): Promise<MemoItem[]> {
-  return updateMemos(() => memos);
+  return sendMessage({ type: "memos:mutate", mutation: { type: "update", id, text } });
 }
 
 export async function getMemos(): Promise<MemoItem[]> {
-  await mutationQueue;
-  return memoStorage.getValue();
+  return sendMessage({ type: "memos:get" });
 }

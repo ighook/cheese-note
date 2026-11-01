@@ -4,9 +4,10 @@ import { defineConfig } from "wxt";
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
-    name: "Chzzk Note",
+    version: "1.0.0",
+    name: "Cheese Note",
     action: {
-      default_title: "Chzzk Note",
+      default_title: "Cheese Note",
     },
     permissions: ["storage"],
     description:
