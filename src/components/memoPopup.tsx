@@ -21,6 +21,9 @@ export function MemoPopup({
   onSave,
 }: MemoPopupProps) {
   const [memo, setMemo] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const saveInProgress = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -40,11 +43,21 @@ export function MemoPopup({
   const handleSave = async () => {
     const trimmedMemo = memo.trim();
 
-    if (!trimmedMemo) {
+    if (!trimmedMemo || saveInProgress.current) {
       return;
     }
 
-    await onSave(trimmedMemo);
+    saveInProgress.current = true;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await onSave(trimmedMemo);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "메모를 저장하지 못했습니다. 다시 시도해주세요.");
+    } finally {
+      saveInProgress.current = false;
+      setSaving(false);
+    }
   };
 
   return (
@@ -86,6 +99,7 @@ export function MemoPopup({
             }
           }}
         />
+        {saveError && <p role="alert">{saveError}</p>}
         <div className={styles.actions}>
           <button
             className={styles["cancel-button"]}
@@ -97,10 +111,10 @@ export function MemoPopup({
           <button
             className={styles["save-button"]}
             type="button"
-            disabled={!memo.trim()}
+            disabled={!memo.trim() || saving}
             onClick={() => void handleSave()}
           >
-            저장
+            {saving ? "저장 중…" : "저장"}
           </button>
         </div>
       </div>
